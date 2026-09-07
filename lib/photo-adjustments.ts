@@ -15,6 +15,8 @@ export type PhotoAdjustmentState = {
   colorBalanceR: number;
   colorBalanceG: number;
   colorBalanceB: number;
+  /** Black (K) plate −1 … +1; darkens/lightens all channels equally */
+  colorBalanceK: number;
   curve: CurvePoint[];
 };
 
@@ -25,6 +27,7 @@ export const NEUTRAL_ADJUSTMENTS: PhotoAdjustmentState = {
   colorBalanceR: 0,
   colorBalanceG: 0,
   colorBalanceB: 0,
+  colorBalanceK: 0,
   curve: DEFAULT_CURVE,
 };
 
@@ -73,7 +76,8 @@ export function buildCurveLut(points: CurvePoint[]): Uint8Array {
 }
 
 export function applyAdjustmentsToImageData(data: Uint8ClampedArray, adjustments: PhotoAdjustmentState) {
-  const { brightness, contrast, colorBalanceR, colorBalanceG, colorBalanceB, curve } = adjustments;
+  const { brightness, contrast, colorBalanceR, colorBalanceG, colorBalanceB, colorBalanceK, curve } =
+    adjustments;
   const lut = buildCurveLut(curve);
   const channelScale = 42;
 
@@ -93,6 +97,10 @@ export function applyAdjustmentsToImageData(data: Uint8ClampedArray, adjustments
     r += colorBalanceR * channelScale;
     g += colorBalanceG * channelScale;
     b += colorBalanceB * channelScale;
+
+    r -= colorBalanceK * channelScale;
+    g -= colorBalanceK * channelScale;
+    b -= colorBalanceK * channelScale;
 
     const lum = 0.299 * r + 0.587 * g + 0.114 * b;
     const mapped = lut[Math.max(0, Math.min(255, Math.round(lum)))];

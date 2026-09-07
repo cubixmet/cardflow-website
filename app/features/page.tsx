@@ -156,7 +156,7 @@ export default function Features() {
                             : "text-base"
                         }`}
                       >
-                        Priya Das
+                        Name
                       </h4>
                     )}
 

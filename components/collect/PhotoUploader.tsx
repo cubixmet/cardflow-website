@@ -9,6 +9,7 @@ import {
   RotateCw,
   Sparkles,
   SunMedium,
+  SwitchCamera,
   Trash2,
   Undo2,
   X,
@@ -26,7 +27,12 @@ import { PhotoSliderControl } from "@/components/collect/photo-editor/photo-slid
 import Button from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { validateFileSize } from "@/lib/file-upload";
-import { approximateSize, paintCropPreview, readFileAsDataUrl, transformImage } from "@/lib/image";
+import {
+  openCameraStream,
+  stopCameraStream,
+  type CameraFacing,
+} from "@/lib/camera-stream";
+import { approximateSize, captureVideoCoverFrame, paintCropPreview, readFileAsDataUrl, transformImage } from "@/lib/image";
 import {
   DEFAULT_CURVE,
   formatPercentNeutral,
@@ -70,6 +76,7 @@ export function PhotoUploader({
   const streamRef = useRef<MediaStream | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<CameraFacing>("environment");
   const [rotation, setRotation] = useState(0);
   const [flipH, setFlipH] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -81,7 +88,8 @@ export function PhotoUploader({
   const [colorBalanceR, setColorBalanceR] = useState(NEUTRAL_ADJUSTMENTS.colorBalanceR);
   const [colorBalanceG, setColorBalanceG] = useState(NEUTRAL_ADJUSTMENTS.colorBalanceG);
   const [colorBalanceB, setColorBalanceB] = useState(NEUTRAL_ADJUSTMENTS.colorBalanceB);
-  const [colorMode, setColorMode] = useState<"rgb" | "cmy">("rgb");
+  const [colorBalanceK, setColorBalanceK] = useState(NEUTRAL_ADJUSTMENTS.colorBalanceK);
+  const [colorMode, setColorMode] = useState<"rgb" | "cmyk">("rgb");
   const [curve, setCurve] = useState<CurvePoint[]>(() => DEFAULT_CURVE.map((p) => ({ ...p })));
   const [busy, setBusy] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
@@ -111,6 +119,7 @@ export function PhotoUploader({
       colorBalanceR,
       colorBalanceG,
       colorBalanceB,
+      colorBalanceK,
       curve,
       aspect: frame.aspect,
     }),
@@ -126,16 +135,15 @@ export function PhotoUploader({
       colorBalanceR,
       colorBalanceG,
       colorBalanceB,
+      colorBalanceK,
       curve,
       frame.aspect,
     ],
   );
 
   const stopCamera = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
+    stopCameraStream(streamRef.current);
+    streamRef.current = null;
     setCameraActive(false);
   }, []);
 
@@ -155,6 +163,7 @@ export function PhotoUploader({
     setColorBalanceR(NEUTRAL_ADJUSTMENTS.colorBalanceR);
     setColorBalanceG(NEUTRAL_ADJUSTMENTS.colorBalanceG);
     setColorBalanceB(NEUTRAL_ADJUSTMENTS.colorBalanceB);
+    setColorBalanceK(NEUTRAL_ADJUSTMENTS.colorBalanceK);
   };
 
   const resetCurve = () => setCurve(DEFAULT_CURVE.map((p) => ({ ...p })));
@@ -169,6 +178,7 @@ export function PhotoUploader({
     resetCurve();
     setColorMode("rgb");
     setActivePanel("zoom");
+    setCameraFacing("environment");
     stopCamera();
   };
 
@@ -208,35 +218,62 @@ export function PhotoUploader({
   }, [open, source, cameraActive, cropOptions, previewWidth, previewHeight]);
 
   useEffect(() => {
+    if (!cameraActive) return;
+    let cancelled = false;
+    void (async () => {
+      stopCameraStream(streamRef.current);
+      streamRef.current = null;
+      try {
+        const { stream, facing } = await openCameraStream({ facing: cameraFacing });
+        if (cancelled) {
+          stopCameraStream(stream);
+          return;
+        }
+        streamRef.current = stream;
+        setCameraFacing(facing);
+        requestAnimationFrame(() => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            void videoRef.current.play();
+          }
+        });
+      } catch {
+        if (!cancelled) {
+          setCameraActive(false);
+          showToast("Could not access camera. Check browser permissions.", "error");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stopCameraStream(streamRef.current);
+      streamRef.current = null;
+    };
+  }, [cameraActive, cameraFacing, showToast]);
+
+  const openCamera = () => {
+    setCameraFacing("environment");
+    setCameraActive(true);
+  };
+
+  useEffect(() => {
     if (!open) reset();
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const openCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } },
-      });
-      streamRef.current = stream;
-      setCameraActive(true);
-      requestAnimationFrame(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          void videoRef.current.play();
-        }
-      });
-    } catch {
-      showToast("Could not access camera. Check browser permissions.", "error");
-    }
-  };
 
   const captureFrame = () => {
     const video = videoRef.current;
     if (!video) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d")!.drawImage(video, 0, 0);
-    setSource(canvas.toDataURL("image/jpeg", 0.92));
+    const dataUrl = captureVideoCoverFrame(video, frame.aspect, 0.92);
+    if (!dataUrl) {
+      showToast("Could not capture photo. Camera is still starting — try again.", "error");
+      return;
+    }
+    setSource(dataUrl);
+    setFlipH(false);
+    setRotation(0);
+    resetView();
+    resetAdjustments();
+    resetCurve();
     stopCamera();
   };
 
@@ -375,14 +412,29 @@ export function PhotoUploader({
 
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
                 {cameraActive ? (
-                  <Button type="button" size="lg" className="w-full" onClick={captureFrame}>
-                    <Camera className="size-4" /> Capture
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button type="button" size="lg" className="flex-1" onClick={captureFrame}>
+                      <Camera className="size-4" /> Capture
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="lg"
+                      className="shrink-0 px-3"
+                      aria-label="Switch camera"
+                      title={cameraFacing === "environment" ? "Use front camera" : "Use back camera"}
+                      onClick={() =>
+                        setCameraFacing((value) => (value === "environment" ? "user" : "environment"))
+                      }
+                    >
+                      <SwitchCamera className="size-5" />
+                    </Button>
+                  </div>
                 ) : null}
 
                 {!cameraActive ? (
                   <div className="grid grid-cols-2 gap-3">
-                    <Button type="button" variant="outline" onClick={() => void openCamera()}>
+                    <Button type="button" variant="outline" onClick={openCamera}>
                       <Camera className="size-4" /> Camera
                     </Button>
                     <Button type="button" variant="outline" onClick={() => galleryRef.current?.click()}>
@@ -531,7 +583,7 @@ export function PhotoUploader({
                           {(
                             [
                               { id: "rgb" as const, label: "RGB" },
-                              { id: "cmy" as const, label: "CMY" },
+                              { id: "cmyk" as const, label: "CMYK" },
                             ] as const
                           ).map((mode) => (
                             <button
@@ -614,6 +666,18 @@ export function PhotoUploader({
                               step={0.02}
                               formatValue={(v) => formatPercentNeutral(v, 0)}
                               onChange={(v) => setColorBalanceB(-v)}
+                            />
+                            <PhotoSliderControl
+                              label="Black"
+                              icon={
+                                <span className="size-2.5 rounded-full bg-neutral-900 ring-1 ring-neutral-400" />
+                              }
+                              value={colorBalanceK}
+                              min={-1}
+                              max={1}
+                              step={0.02}
+                              formatValue={(v) => formatPercentNeutral(v, 0)}
+                              onChange={setColorBalanceK}
                             />
                           </>
                         )}

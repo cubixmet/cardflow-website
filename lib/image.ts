@@ -22,6 +22,7 @@ export interface TransformOptions {
   colorBalanceR?: number;
   colorBalanceG?: number;
   colorBalanceB?: number;
+  colorBalanceK?: number;
   curve?: PhotoAdjustmentState["curve"];
   quality?: number;
 }
@@ -87,6 +88,7 @@ function applyPixelAdjustments(
     | "colorBalanceR"
     | "colorBalanceG"
     | "colorBalanceB"
+    | "colorBalanceK"
     | "curve"
   >,
 ) {
@@ -97,6 +99,7 @@ function applyPixelAdjustments(
     colorBalanceR: options.colorBalanceR ?? 0,
     colorBalanceG: options.colorBalanceG ?? 0,
     colorBalanceB: options.colorBalanceB ?? 0,
+    colorBalanceK: options.colorBalanceK ?? 0,
     curve: options.curve ?? NEUTRAL_ADJUSTMENTS.curve,
   };
   const needsAdjust =
@@ -105,6 +108,7 @@ function applyPixelAdjustments(
     Math.abs(adjustments.colorBalanceR) > 0.01 ||
     Math.abs(adjustments.colorBalanceG) > 0.01 ||
     Math.abs(adjustments.colorBalanceB) > 0.01 ||
+    Math.abs(adjustments.colorBalanceK) > 0.01 ||
     adjustments.curve.length !== DEFAULT_CURVE.length ||
     adjustments.curve.some((p, i) => {
       const d = DEFAULT_CURVE[i];
@@ -138,6 +142,7 @@ export function drawCroppedPhoto(
     | "colorBalanceR"
     | "colorBalanceG"
     | "colorBalanceB"
+    | "colorBalanceK"
     | "curve"
   >,
   outW: number,
@@ -229,6 +234,47 @@ export async function paintCropPreview(
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(canvas.width / displayW, canvas.height / displayH);
   drawCroppedPhoto(ctx, image, options, displayW, displayH);
+}
+
+/**
+ * Crop a live video frame the same way CSS `object-cover` would inside a box
+ * with the given aspect ratio (width / height). Matches the camera preview so
+ * the captured still does not appear zoomed out after capture.
+ */
+export function captureVideoCoverFrame(
+  video: HTMLVideoElement,
+  frameAspect: number,
+  quality = 0.92,
+): string | null {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh || !Number.isFinite(frameAspect) || frameAspect <= 0) return null;
+
+  const videoAspect = vw / vh;
+  let sx = 0;
+  let sy = 0;
+  let sw = vw;
+  let sh = vh;
+
+  if (videoAspect > frameAspect) {
+    sw = Math.round(vh * frameAspect);
+    sx = Math.round((vw - sw) / 2);
+  } else if (videoAspect < frameAspect) {
+    sh = Math.round(vw / frameAspect);
+    sy = Math.round((vh - sh) / 2);
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+  try {
+    return canvas.toDataURL("image/jpeg", quality);
+  } catch {
+    return null;
+  }
 }
 
 export function approximateSize(dataUrl: string): string {

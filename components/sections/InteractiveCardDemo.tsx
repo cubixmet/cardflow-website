@@ -40,7 +40,7 @@ const TEMPLATES: Record<TemplateId, TemplateStyle> = {
 
 export default function InteractiveCardDemo() {
   const [template, setTemplate] = useState<TemplateId>("corporate");
-  const [name, setName] = useState("Ananya K");
+  const [name, setName] = useState("Robert");
   const [title, setTitle] = useState("Admin Officer");
   const [idNum, setIdNum] = useState("Z-CF-892410");
   const [isFlipped, setIsFlipped] = useState(false);
@@ -199,7 +199,7 @@ export default function InteractiveCardDemo() {
                       style={{ fontFamily: "'Brush Script MT', cursive, sans-serif" }} 
                       className="text-2xl text-white/90 border-b border-white/20 px-8 pb-1 tracking-wide"
                     >
-                      {name || "Ananya K"}
+                      {name || "Robert"}
                     </span>
                     <span className="text-[7px] uppercase tracking-widest text-white/40 block mt-1 font-bold">
                       Authorized Signature
