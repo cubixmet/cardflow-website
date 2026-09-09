@@ -1,5 +1,5 @@
 export const MAX_UPLOAD_SIZE_MB =
-  Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB ?? 200) || 200;
+  Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB ?? 5000) || 5000;
 
 export const MAX_UPLOAD_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
 

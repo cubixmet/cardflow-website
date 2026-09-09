@@ -1,7 +1,7 @@
 import { Minus, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { Button } from "@/components/ui/Button";
+import Button from "@/components/ui/Button";
 import { Slider } from "@/components/ui/Slider";
 import { formatSliderValue } from "@/lib/photo-adjustments";
 
@@ -49,13 +49,13 @@ export function PhotoSliderControl({
         <Button
           type="button"
           variant="outline"
-          size="icon"
-          className="size-10 shrink-0"
+          size="sm"
+          className="!size-10 shrink-0 !p-0"
           aria-label={`Decrease ${label}`}
           disabled={value <= min}
           onClick={() => onChange(stepValue(value, -step, min, max, step))}
         >
-          <Minus />
+          <Minus className="size-4" />
         </Button>
         <Slider
           className="min-h-10 flex-1"
@@ -68,13 +68,13 @@ export function PhotoSliderControl({
         <Button
           type="button"
           variant="outline"
-          size="icon"
-          className="size-10 shrink-0"
+          size="sm"
+          className="!size-10 shrink-0 !p-0"
           aria-label={`Increase ${label}`}
           disabled={value >= max}
           onClick={() => onChange(stepValue(value, step, min, max, step))}
         >
-          <Plus />
+          <Plus className="size-4" />
         </Button>
       </div>
     </div>
