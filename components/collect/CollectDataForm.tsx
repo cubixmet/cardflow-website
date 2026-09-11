@@ -88,6 +88,21 @@ function fieldLabel(field: SchemaField) {
   return `${field.label}${field.is_required ? " *" : ""}`;
 }
 
+/** Normalize stored/API dates to YYYY-MM-DD for <input type="date">. */
+function toDateInputValue(raw: string | undefined): string {
+  if (!raw) return "";
+  const value = String(raw).trim();
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{4})$/.exec(value);
+  if (dmy) {
+    const dd = dmy[1].padStart(2, "0");
+    const mm = dmy[3].padStart(2, "0");
+    return `${dmy[4]}-${mm}-${dd}`;
+  }
+  return "";
+}
+
 export function CollectDataForm() {
   const params = useParams<{ orgId: string; linkId: string }>();
   const orgId = params.orgId;
@@ -490,7 +505,19 @@ export function CollectDataForm() {
                       required
                     />
 
-                    {textFields.map((field) => (
+                    {textFields.map((field) => {
+                      const clearFieldError = () =>
+                        setErrors((prev) => {
+                          const next = { ...prev };
+                          delete next[field.key];
+                          return next;
+                        });
+                      const setFieldValue = (value: string) => {
+                        setValues((v) => ({ ...v, [field.key]: value }));
+                        clearFieldError();
+                      };
+
+                      return (
                       <div key={field.key} className="space-y-1.5">
                         {field.field_type === "dropdown" || field.field_type === "radio" ? (
                           <>
@@ -500,14 +527,7 @@ export function CollectDataForm() {
                                 errors[field.key] ? "border-destructive" : "border-border"
                               }`}
                               value={values[field.key] || ""}
-                              onChange={(e) => {
-                                setValues((v) => ({ ...v, [field.key]: e.target.value }));
-                                setErrors((prev) => {
-                                  const next = { ...prev };
-                                  delete next[field.key];
-                                  return next;
-                                });
-                              }}
+                              onChange={(e) => setFieldValue(e.target.value)}
                             >
                               <option value="">Select…</option>
                               {(field.options || []).map((opt) => (
@@ -517,19 +537,49 @@ export function CollectDataForm() {
                               ))}
                             </select>
                           </>
+                        ) : field.field_type === "date" ? (
+                          <Input
+                            type="date"
+                            label={fieldLabel(field)}
+                            value={toDateInputValue(values[field.key])}
+                            max="2100-12-31"
+                            min="1900-01-01"
+                            onChange={(e) => setFieldValue(e.target.value)}
+                            error={errors[field.key]}
+                            className="h-12 rounded-xl"
+                          />
+                        ) : field.field_type === "textarea" ? (
+                          <div className="w-full text-left">
+                            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted">
+                              {fieldLabel(field)}
+                            </label>
+                            <textarea
+                              className={`min-h-24 w-full rounded-xl border bg-background px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 ${
+                                errors[field.key] ? "border-destructive" : "border-border"
+                              }`}
+                              value={values[field.key] || ""}
+                              placeholder={field.placeholder}
+                              onChange={(e) => setFieldValue(e.target.value)}
+                            />
+                            {errors[field.key] ? (
+                              <p className="mt-1 text-[13px] font-medium text-error">{errors[field.key]}</p>
+                            ) : null}
+                          </div>
                         ) : (
                           <Input
+                            type={
+                              field.field_type === "email"
+                                ? "email"
+                                : field.field_type === "phone"
+                                  ? "tel"
+                                  : field.field_type === "number"
+                                    ? "number"
+                                    : "text"
+                            }
                             label={fieldLabel(field)}
                             value={values[field.key] || ""}
                             placeholder={field.placeholder}
-                            onChange={(e) => {
-                              setValues((v) => ({ ...v, [field.key]: e.target.value }));
-                              setErrors((prev) => {
-                                const next = { ...prev };
-                                delete next[field.key];
-                                return next;
-                              });
-                            }}
+                            onChange={(e) => setFieldValue(e.target.value)}
                             error={errors[field.key]}
                           />
                         )}
@@ -541,7 +591,8 @@ export function CollectDataForm() {
                           <p className="text-xs text-destructive">{errors[field.key]}</p>
                         ) : null}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {mediaFields.length > 0 ? (
