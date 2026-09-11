@@ -360,7 +360,7 @@ export function PhotoUploader({
           <motion.button
             type="button"
             aria-label="Close photo editor"
-            className="fixed inset-0 z-[200] bg-black/70"
+            className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-md supports-[backdrop-filter]:bg-black/30"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -370,7 +370,7 @@ export function PhotoUploader({
             role="dialog"
             aria-modal="true"
             aria-labelledby="photo-uploader-title"
-            className="fixed inset-x-0 bottom-0 z-[201] mx-auto flex h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl sm:inset-x-auto sm:left-1/2 sm:w-[min(100vw-2rem,32rem)] sm:-translate-x-1/2"
+            className="fixed inset-x-0 bottom-0 z-[201] mx-auto flex h-[min(88vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-white/20 bg-card/80 shadow-2xl backdrop-blur-2xl supports-[backdrop-filter]:bg-card/70 sm:inset-x-auto sm:left-1/2 sm:w-[min(100vw-2rem,32rem)] sm:-translate-x-1/2 dark:border-white/10"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
@@ -461,7 +461,7 @@ export function PhotoUploader({
                 </div>
 
                 {(cameraActive || source) && (
-                  <div className="sticky top-0 z-10 border-b border-border/60 bg-card px-4 py-3">
+                  <div className="sticky top-0 z-10 border-b border-border/60 bg-card/70 px-4 py-3 backdrop-blur-xl supports-[backdrop-filter]:bg-card/50">
                     <PhotoEditorTabs value={activePanel} onChange={setActivePanel} />
                   </div>
                 )}
