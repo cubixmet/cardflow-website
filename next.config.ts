@@ -76,6 +76,11 @@ const nextConfig: NextConfig = {
 
     return [
       {
+        source: "/:path*",
+        headers,
+      },
+      // Must come after the catch-all so camera=(self) wins over camera=().
+      {
         source: "/collect-data/:path*",
         headers: [
           {
@@ -83,10 +88,6 @@ const nextConfig: NextConfig = {
             value: "camera=(self), microphone=(), geolocation=()",
           },
         ],
-      },
-      {
-        source: "/:path*",
-        headers,
       },
     ];
   },

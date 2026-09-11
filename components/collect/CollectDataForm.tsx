@@ -17,6 +17,13 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { PhotoUploader } from "@/components/collect/PhotoUploader";
 import { dataUrlToFile } from "@/lib/data-url";
+import {
+  extractImageFramesByFieldKey,
+  framePreviewBoxStyle,
+  resolveImageFrame,
+  resolvePhotoFrame,
+  type PhotoFrame,
+} from "@/lib/photo-frame";
 
 type Level1 = { id: string; name: string; children: { id: string; name: string; level1_id: string }[] };
 type SchemaField = {
@@ -114,6 +121,8 @@ export function CollectDataForm() {
   const [level1Id, setLevel1Id] = useState("");
   const [level2Id, setLevel2Id] = useState("");
   const [schema, setSchema] = useState<SchemaField[]>([]);
+  const [designDocument, setDesignDocument] = useState<Record<string, unknown> | null>(null);
+  const [photoFrame, setPhotoFrame] = useState<PhotoFrame | null>(null);
   const [uniqueKey, setUniqueKey] = useState("holder_code");
   const [holderCode, setHolderCode] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
@@ -159,6 +168,8 @@ export function CollectDataForm() {
   useEffect(() => {
     if (!level1Id || !level2Id) {
       setSchema([]);
+      setDesignDocument(null);
+      setPhotoFrame(null);
       return;
     }
     let cancelled = false;
@@ -168,13 +179,27 @@ export function CollectDataForm() {
         const res = await fetch(
           `/server/collect-data/${orgId}/${linkId}/schema/?level1=${level1Id}&level2=${level2Id}`,
         );
-        const data = (await res.json()) as { fields?: SchemaField[]; detail?: string };
+        const data = (await res.json()) as {
+          fields?: SchemaField[];
+          document?: Record<string, unknown> | null;
+          photo_frame?: {
+            width_mm?: number;
+            height_mm?: number;
+            radius_mm?: number;
+            aspect?: number;
+            image_shape?: string;
+            sides?: number;
+          } | null;
+          detail?: string;
+        };
         if (!res.ok) {
           throw new Error(data.detail || "Could not load form fields.");
         }
         if (cancelled) return;
         const fields = data.fields || [];
         setSchema(fields);
+        setDesignDocument(data.document ?? null);
+        setPhotoFrame(resolvePhotoFrame(data.photo_frame, data.document ?? null));
         const unique = fields.find((f) => f.is_unique)?.key || "holder_code";
         setUniqueKey(unique);
         setValues({});
@@ -185,6 +210,8 @@ export function CollectDataForm() {
       } catch (err) {
         if (!cancelled) {
           setSchema([]);
+          setDesignDocument(null);
+          setPhotoFrame(null);
           setSubmitError(err instanceof Error ? err.message : "Could not load form fields.");
         }
       } finally {
@@ -202,6 +229,19 @@ export function CollectDataForm() {
     [schema, uniqueKey],
   );
   const uniqueLabel = schema.find((f) => f.key === uniqueKey)?.label || "Unique ID";
+  const imageFramesByKey = useMemo(
+    () => extractImageFramesByFieldKey(designDocument),
+    [designDocument],
+  );
+
+  const frameForField = (fieldKey: string, fieldType: string): PhotoFrame => {
+    const role = fieldType === "photo" || fieldKey === "photo" ? "photo" : "image";
+    const fromDoc = resolveImageFrame(imageFramesByKey, fieldKey, role);
+    if (imageFramesByKey[fieldKey] || imageFramesByKey.__primary__) {
+      return fromDoc;
+    }
+    return photoFrame ?? fromDoc;
+  };
 
   const validate = () => {
     const next: Record<string, string> = {};
@@ -601,46 +641,68 @@ export function CollectDataForm() {
                         Required photos
                       </h2>
                       <div className="grid gap-4 sm:grid-cols-2">
-                        {mediaFields.map((field) => (
-                          <div
+                        {mediaFields.map((field) => {
+                          const fieldFrame = frameForField(field.key, field.field_type);
+                          const thumbStyle = framePreviewBoxStyle(fieldFrame, 160);
+                          const hasPhoto = Boolean(pendingImages[field.key]);
+                          return (
+                          <button
                             key={field.key}
-                            className={`rounded-2xl border p-4 ${
+                            type="button"
+                            onClick={() => setPhotoEditorKey(field.key)}
+                            className={`w-full rounded-2xl border p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-primary/20 ${
                               errors[field.key] ? "border-destructive bg-destructive/5" : "border-border bg-muted/20"
                             }`}
+                            aria-label={
+                              hasPhoto
+                                ? `Edit ${field.label}`
+                                : `Add ${field.label}`
+                            }
                           >
                             <div className="mb-3 flex items-center gap-2">
                               <Camera className="size-4 text-primary" />
-                              <label className="text-sm font-medium">{field.label} *</label>
+                              <span className="text-sm font-medium">{field.label} *</span>
                             </div>
-                            {pendingImages[field.key] ? (
-                              <div className="mb-3 overflow-hidden rounded-xl border border-border bg-background">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={pendingImages[field.key]}
-                                  alt={field.label}
-                                  className="aspect-[4/3] w-full object-cover"
-                                />
-                              </div>
-                            ) : (
-                              <div className="mb-3 flex aspect-[4/3] items-center justify-center rounded-xl border border-dashed border-border bg-background/80">
-                                <Camera className="size-8 text-muted-foreground/50" />
-                              </div>
-                            )}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => setPhotoEditorKey(field.key)}
-                            >
-                              <Sparkles className="size-4" />
-                              {pendingImages[field.key] ? "Enhance photo" : "Add & enhance photo"}
-                            </Button>
+                            <div className="mb-3 flex justify-center">
+                              {hasPhoto ? (
+                                <div
+                                  className="border border-border bg-background"
+                                  style={thumbStyle}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={pendingImages[field.key]}
+                                    alt={field.label}
+                                    className="size-full object-cover"
+                                    style={{
+                                      borderRadius: thumbStyle.borderRadius,
+                                      clipPath: thumbStyle.clipPath,
+                                      WebkitClipPath: thumbStyle.WebkitClipPath,
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div
+                                  className="flex flex-col items-center justify-center gap-2 border border-dashed border-border bg-background/80"
+                                  style={thumbStyle}
+                                >
+                                  <Camera className="size-8 text-muted-foreground/50" />
+                                  <span className="px-2 text-center text-xs text-muted-foreground">
+                                    Tap to add photo
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-primary">
+                              <Sparkles className="size-3.5" />
+                              {hasPhoto ? "Tap to enhance or replace" : "Tap to capture or upload"}
+                            </p>
                             {errors[field.key] ? (
                               <p className="mt-2 text-xs text-destructive">{errors[field.key]}</p>
                             ) : null}
-                          </div>
-                        ))}
+                          </button>
+                          );
+                        })}
                       </div>
                     </div>
                   ) : null}
@@ -672,6 +734,11 @@ export function CollectDataForm() {
           currentPhoto={pendingImages[photoEditorKey] || null}
           personName={holderCode.trim() || values.name || config.organisation.name}
           fieldLabel={mediaFields.find((f) => f.key === photoEditorKey)?.label || "Photo"}
+          frame={frameForField(
+            photoEditorKey,
+            mediaFields.find((f) => f.key === photoEditorKey)?.field_type || "photo",
+          )}
+          designDocument={designDocument}
           onSave={async (dataUrl) => {
             setPendingImage(photoEditorKey, dataUrl);
           }}

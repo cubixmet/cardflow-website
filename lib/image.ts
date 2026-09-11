@@ -126,9 +126,34 @@ function applyPixelAdjustments(
   applySharpen(ctx, width, height, adjustments.sharpness);
 }
 
+/** Intrinsic pixel size for canvas draw sources (image, video, bitmap). */
+export function mediaSourceSize(
+  image: CanvasImageSource,
+): { width: number; height: number } | null {
+  if (typeof HTMLVideoElement !== "undefined" && image instanceof HTMLVideoElement) {
+    const width = image.videoWidth;
+    const height = image.videoHeight;
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+  if (typeof HTMLImageElement !== "undefined" && image instanceof HTMLImageElement) {
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+  if (typeof ImageBitmap !== "undefined" && image instanceof ImageBitmap) {
+    return image.width > 0 && image.height > 0
+      ? { width: image.width, height: image.height }
+      : null;
+  }
+  const maybe = image as { width?: number; height?: number };
+  const width = Number(maybe.width) || 0;
+  const height = Number(maybe.height) || 0;
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
 export function drawCroppedPhoto(
   ctx: CanvasRenderingContext2D,
-  image: CanvasImageSource & { width: number; height: number },
+  image: CanvasImageSource,
   options: Pick<
     TransformOptions,
     | "rotation"
@@ -148,14 +173,9 @@ export function drawCroppedPhoto(
   outW: number,
   outH: number,
 ) {
-  const imgW =
-    "naturalWidth" in image && (image as HTMLImageElement).naturalWidth
-      ? (image as HTMLImageElement).naturalWidth
-      : image.width;
-  const imgH =
-    "naturalHeight" in image && (image as HTMLImageElement).naturalHeight
-      ? (image as HTMLImageElement).naturalHeight
-      : image.height;
+  const size = mediaSourceSize(image);
+  if (!size) return;
+  const { width: imgW, height: imgH } = size;
 
   const zoom = Math.max(options.zoom || 1, 1);
   const rotation = ((options.rotation % 360) + 360) % 360;
@@ -237,39 +257,68 @@ export async function paintCropPreview(
 }
 
 /**
- * Crop a live video frame the same way CSS `object-cover` would inside a box
- * with the given aspect ratio (width / height). Matches the camera preview so
- * the captured still does not appear zoomed out after capture.
+ * Capture a live video frame using the same cover/zoom/pan/adjust model as the editor
+ * preview (`drawCroppedPhoto`), so capture matches what the user sees.
  */
 export function captureVideoCoverFrame(
   video: HTMLVideoElement,
   frameAspect: number,
   quality = 0.92,
+  opts?: Partial<
+    Pick<
+      TransformOptions,
+      | "rotation"
+      | "flipH"
+      | "zoom"
+      | "offsetX"
+      | "offsetY"
+      | "brightness"
+      | "contrast"
+      | "sharpness"
+      | "colorBalanceR"
+      | "colorBalanceG"
+      | "colorBalanceB"
+      | "colorBalanceK"
+      | "curve"
+    >
+  >,
 ): string | null {
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  if (!vw || !vh || !Number.isFinite(frameAspect) || frameAspect <= 0) return null;
+  if (!mediaSourceSize(video)) return null;
+  if (!Number.isFinite(frameAspect) || frameAspect <= 0) return null;
 
-  const videoAspect = vw / vh;
-  let sx = 0;
-  let sy = 0;
-  let sw = vw;
-  let sh = vh;
-
-  if (videoAspect > frameAspect) {
-    sw = Math.round(vh * frameAspect);
-    sx = Math.round((vw - sw) / 2);
-  } else if (videoAspect < frameAspect) {
-    sh = Math.round(vw / frameAspect);
-    sy = Math.round((vh - sh) / 2);
-  }
+  const aspect = frameAspect;
+  const maxSide = 1280;
+  const outW = aspect >= 1 ? maxSide : Math.max(1, Math.round(maxSide * aspect));
+  const outH = aspect >= 1 ? Math.max(1, Math.round(maxSide / aspect)) : maxSide;
 
   const canvas = document.createElement("canvas");
-  canvas.width = sw;
-  canvas.height = sh;
+  canvas.width = outW;
+  canvas.height = outH;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  drawCroppedPhoto(
+    ctx,
+    video,
+    {
+      rotation: opts?.rotation ?? 0,
+      flipH: Boolean(opts?.flipH),
+      zoom: Math.max(1, Math.min(2.5, opts?.zoom ?? 1)),
+      offsetX: Math.max(-1, Math.min(1, opts?.offsetX ?? 0)),
+      offsetY: Math.max(-1, Math.min(1, opts?.offsetY ?? 0)),
+      brightness: opts?.brightness ?? NEUTRAL_ADJUSTMENTS.brightness,
+      contrast: opts?.contrast ?? NEUTRAL_ADJUSTMENTS.contrast,
+      sharpness: opts?.sharpness ?? NEUTRAL_ADJUSTMENTS.sharpness,
+      colorBalanceR: opts?.colorBalanceR ?? NEUTRAL_ADJUSTMENTS.colorBalanceR,
+      colorBalanceG: opts?.colorBalanceG ?? NEUTRAL_ADJUSTMENTS.colorBalanceG,
+      colorBalanceB: opts?.colorBalanceB ?? NEUTRAL_ADJUSTMENTS.colorBalanceB,
+      colorBalanceK: opts?.colorBalanceK ?? NEUTRAL_ADJUSTMENTS.colorBalanceK,
+      curve: opts?.curve ?? DEFAULT_CURVE,
+    },
+    outW,
+    outH,
+  );
+
   try {
     return canvas.toDataURL("image/jpeg", quality);
   } catch {

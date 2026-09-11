@@ -30,9 +30,16 @@ import { validateFileSize } from "@/lib/file-upload";
 import {
   openCameraStream,
   stopCameraStream,
+  cameraErrorMessage,
   type CameraFacing,
 } from "@/lib/camera-stream";
-import { approximateSize, captureVideoCoverFrame, paintCropPreview, readFileAsDataUrl, transformImage } from "@/lib/image";
+import {
+  approximateSize,
+  captureVideoCoverFrame,
+  paintCropPreview,
+  readFileAsDataUrl,
+  transformImage,
+} from "@/lib/image";
 import {
   DEFAULT_CURVE,
   formatPercentNeutral,
@@ -40,6 +47,7 @@ import {
   type CurvePoint,
 } from "@/lib/photo-adjustments";
 import {
+  ensurePhotoFrameShape,
   extractPhotoFrame,
   frameBorderRadiusCss,
   photoPreviewSize,
@@ -58,6 +66,18 @@ interface PhotoUploaderProps {
   designDocument?: Record<string, unknown> | null;
 }
 
+function frameShapeCaption(frame: PhotoFrame): string {
+  const shape = frame.imageShape ?? "rectangle";
+  if (shape === "polygon") {
+    return (frame.sides ?? 6) === 6 ? "hexagon" : `${frame.sides ?? 6}-sided polygon`;
+  }
+  if (shape === "circle") return "circle";
+  if (shape === "triangle") return "triangle";
+  if (shape === "star") return "star";
+  if (frame.radiusMm > 0) return `rounded rectangle · radius ${frame.radiusMm.toFixed(1)} mm`;
+  return "rectangle";
+}
+
 export function PhotoUploader({
   open,
   onOpenChange,
@@ -74,6 +94,7 @@ export function PhotoUploader({
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const paintGenRef = useRef(0);
   const [source, setSource] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<CameraFacing>("environment");
@@ -89,14 +110,14 @@ export function PhotoUploader({
   const [colorBalanceG, setColorBalanceG] = useState(NEUTRAL_ADJUSTMENTS.colorBalanceG);
   const [colorBalanceB, setColorBalanceB] = useState(NEUTRAL_ADJUSTMENTS.colorBalanceB);
   const [colorBalanceK, setColorBalanceK] = useState(NEUTRAL_ADJUSTMENTS.colorBalanceK);
-  const [colorMode, setColorMode] = useState<"rgb" | "cmyk">("rgb");
+  const [colorMode, setColorMode] = useState<"rgb" | "cmyk">("cmyk");
   const [curve, setCurve] = useState<CurvePoint[]>(() => DEFAULT_CURVE.map((p) => ({ ...p })));
   const [busy, setBusy] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
   const [activePanel, setActivePanel] = useState<PhotoEditorPanel>("zoom");
 
   const frame = useMemo(
-    () => frameProp ?? extractPhotoFrame(designDocument),
+    () => ensurePhotoFrameShape(frameProp ?? extractPhotoFrame(designDocument), designDocument),
     [frameProp, designDocument],
   );
 
@@ -176,7 +197,7 @@ export function PhotoUploader({
     resetAdjustments();
     resetColorBalance();
     resetCurve();
-    setColorMode("rgb");
+    setColorMode("cmyk");
     setActivePanel("zoom");
     setCameraFacing("environment");
     stopCamera();
@@ -187,7 +208,7 @@ export function PhotoUploader({
   useEffect(() => {
     if (!open) return;
     if (cameraActive || !currentPhoto) return;
-    setSource((prev) => prev ?? currentPhoto);
+    setSource((prev) => (prev?.startsWith("data:") ? prev : prev ?? currentPhoto));
   }, [open, currentPhoto, cameraActive]);
 
   useEffect(() => {
@@ -196,16 +217,16 @@ export function PhotoUploader({
       return;
     }
     let cancelled = false;
-    setCanvasReady(false);
+    const gen = ++paintGenRef.current;
     const paint = () => {
       const canvas = previewCanvasRef.current;
       if (!canvas || cancelled) return false;
       void paintCropPreview(canvas, source, cropOptions, previewWidth, previewHeight)
         .then(() => {
-          if (!cancelled) setCanvasReady(true);
+          if (!cancelled && gen === paintGenRef.current) setCanvasReady(true);
         })
         .catch(() => {
-          if (!cancelled) setCanvasReady(false);
+          if (!cancelled && gen === paintGenRef.current) setCanvasReady(false);
         });
       return true;
     };
@@ -237,10 +258,10 @@ export function PhotoUploader({
             void videoRef.current.play();
           }
         });
-      } catch {
+      } catch (error) {
         if (!cancelled) {
           setCameraActive(false);
-          showToast("Could not access camera. Check browser permissions.", "error");
+          showToast(cameraErrorMessage(error), "error");
         }
       }
     })();
@@ -253,6 +274,15 @@ export function PhotoUploader({
 
   const openCamera = () => {
     setCameraFacing("environment");
+    setSource(null);
+    setCanvasReady(false);
+    setFlipH(false);
+    setRotation(0);
+    resetView();
+    resetAdjustments();
+    resetColorBalance();
+    resetCurve();
+    setActivePanel("zoom");
     setCameraActive(true);
   };
 
@@ -263,7 +293,7 @@ export function PhotoUploader({
   const captureFrame = () => {
     const video = videoRef.current;
     if (!video) return;
-    const dataUrl = captureVideoCoverFrame(video, frame.aspect, 0.92);
+    const dataUrl = captureVideoCoverFrame(video, frame.aspect, 0.92, cropOptions);
     if (!dataUrl) {
       showToast("Could not capture photo. Camera is still starting — try again.", "error");
       return;
@@ -273,7 +303,9 @@ export function PhotoUploader({
     setRotation(0);
     resetView();
     resetAdjustments();
+    resetColorBalance();
     resetCurve();
+    setActivePanel("zoom");
     stopCamera();
   };
 
@@ -352,8 +384,8 @@ export function PhotoUploader({
                 <p className="mt-0.5 text-sm text-muted-foreground">{personName}</p>
                 {frame.widthMm > 0 ? (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Frame {frame.widthMm.toFixed(1)}×{frame.heightMm.toFixed(1)} mm
-                    {frame.radiusMm > 0 ? ` · radius ${frame.radiusMm.toFixed(1)} mm` : ""}
+                    Frame matches card template · {frame.widthMm.toFixed(1)}×{frame.heightMm.toFixed(1)}{" "}
+                    mm · {frameShapeCaption(frame)}
                   </p>
                 ) : null}
               </div>
@@ -368,350 +400,384 @@ export function PhotoUploader({
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="shrink-0 border-b border-border/60 px-4 py-3">
-                <div className="mx-auto grid max-w-full place-items-center">
-                  <PhotoPreviewFrame
-                    previewWidth={previewWidth}
-                    previewHeight={previewHeight}
-                    borderRadius={borderRadius}
-                    cameraActive={cameraActive}
-                    source={source}
-                    canvasReady={canvasReady}
-                    videoRef={videoRef}
-                    previewCanvasRef={previewCanvasRef}
-                    zoom={zoom}
-                    offsetX={offsetX}
-                    offsetY={offsetY}
-                    onZoomChange={setZoom}
-                    onOffsetChange={(x, y) => {
-                      setOffsetX(x);
-                      setOffsetY(y);
-                    }}
-                  />
-                  {source ? (
-                    <p className="mt-2 max-w-sm text-center text-xs text-muted-foreground">
-                      Pinch or scroll to zoom. Drag inside the frame to crop/reposition.
-                    </p>
-                  ) : (
-                    !cameraActive && (
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                <div className="border-b border-border/60 px-4 py-3">
+                  <div className="mx-auto grid max-w-full place-items-center">
+                    <PhotoPreviewFrame
+                      frame={frame}
+                      previewWidth={previewWidth}
+                      previewHeight={previewHeight}
+                      borderRadius={borderRadius}
+                      cameraActive={cameraActive}
+                      source={source}
+                      canvasReady={canvasReady}
+                      videoRef={videoRef}
+                      previewCanvasRef={previewCanvasRef}
+                      zoom={zoom}
+                      offsetX={offsetX}
+                      offsetY={offsetY}
+                      cropOptions={cropOptions}
+                      onZoomChange={setZoom}
+                      onOffsetChange={(x, y) => {
+                        setOffsetX(x);
+                        setOffsetY(y);
+                      }}
+                    />
+                    {cameraActive ? (
+                      <div className="mt-3 flex w-full max-w-sm gap-2">
+                        <Button type="button" size="lg" className="flex-1" onClick={captureFrame}>
+                          <Camera className="size-4" /> Capture
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="lg"
+                          className="shrink-0 px-3"
+                          aria-label="Switch camera"
+                          title={
+                            cameraFacing === "environment" ? "Use front camera" : "Use back camera"
+                          }
+                          onClick={() =>
+                            setCameraFacing((value) =>
+                              value === "environment" ? "user" : "environment",
+                            )
+                          }
+                        >
+                          <SwitchCamera className="size-5" />
+                        </Button>
+                      </div>
+                    ) : source ? (
+                      <p className="mt-2 max-w-sm text-center text-xs text-muted-foreground">
+                        Pinch or scroll to zoom. Drag inside the frame to crop/reposition.
+                      </p>
+                    ) : (
                       <p className="mt-2 max-w-sm text-center text-xs text-muted-foreground">
                         {currentPhoto
                           ? "Choose Camera or Gallery to replace the current photo."
                           : "Choose Camera or Gallery to add a photo."}
                       </p>
-                    )
+                    )}
+                  </div>
+                </div>
+
+                {(cameraActive || source) && (
+                  <div className="sticky top-0 z-10 border-b border-border/60 bg-card px-4 py-3">
+                    <PhotoEditorTabs value={activePanel} onChange={setActivePanel} />
+                  </div>
+                )}
+
+                <div className="px-4 py-4">
+                  {!cameraActive ? (
+                    <div className={`grid grid-cols-2 gap-3${source ? " mb-4" : ""}`}>
+                      <Button type="button" variant="outline" onClick={openCamera}>
+                        <Camera className="size-4" /> Camera
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => galleryRef.current?.click()}>
+                        <ImageIcon className="size-4" /> Gallery
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  <input
+                    ref={galleryRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={(event) => void pick(event.target.files?.[0])}
+                  />
+
+                  {(cameraActive || source) && (
+                    <div className="space-y-4">
+                      {activePanel === "zoom" ? (
+                        <PhotoEditorSection
+                          title="Zoom"
+                          action={
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setZoom(1);
+                                if (cameraActive) {
+                                  setOffsetX(0);
+                                  setOffsetY(0);
+                                }
+                              }}
+                            >
+                              <Undo2 className="size-3.5" /> Reset
+                            </Button>
+                          }
+                        >
+                          <PhotoSliderControl
+                            label="Zoom"
+                            icon={<ZoomIn className="size-4" />}
+                            value={zoom}
+                            min={1}
+                            max={2.5}
+                            step={0.05}
+                            formatValue={(v) =>
+                              cameraActive ? `${v.toFixed(1)}×` : `${Math.round((v - 1) * 100)}%`
+                            }
+                            onChange={(value) => {
+                              setZoom(value);
+                              if (value <= 1.01) {
+                                setOffsetX(0);
+                                setOffsetY(0);
+                              }
+                            }}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            {cameraActive
+                              ? "Zoom before capture. When zoomed in, drag the preview to reposition."
+                              : "Scroll or pinch on the preview to zoom. Use Crop to reposition."}
+                          </p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => setRotation((value) => (value + 90) % 360)}
+                            >
+                              <RotateCw className="size-4" /> Rotate
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={flipH ? "primary" : "outline"}
+                              onClick={() => setFlipH((value) => !value)}
+                            >
+                              <FlipHorizontal className="size-4" /> {flipH ? "Flipped" : "Flip"}
+                            </Button>
+                          </div>
+                        </PhotoEditorSection>
+                      ) : null}
+
+                      {activePanel === "crop" ? (
+                        <PhotoEditorSection
+                          title="Crop"
+                          action={
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setOffsetX(0);
+                                setOffsetY(0);
+                              }}
+                            >
+                              <Undo2 className="size-3.5" /> Reset
+                            </Button>
+                          }
+                        >
+                          <p className="text-xs text-muted-foreground">
+                            Drag inside the frame to move the crop, or fine-tune below.
+                          </p>
+                          <PhotoSliderControl
+                            label="Horizontal"
+                            value={offsetX}
+                            min={-1}
+                            max={1}
+                            step={0.02}
+                            formatValue={(v) => formatPercentNeutral(v, 0)}
+                            onChange={setOffsetX}
+                          />
+                          <PhotoSliderControl
+                            label="Vertical"
+                            value={offsetY}
+                            min={-1}
+                            max={1}
+                            step={0.02}
+                            formatValue={(v) => formatPercentNeutral(v, 0)}
+                            onChange={setOffsetY}
+                          />
+                        </PhotoEditorSection>
+                      ) : null}
+
+                      {activePanel === "basic" ? (
+                        <PhotoEditorSection
+                          title="Basic Adjustments"
+                          action={
+                            <Button type="button" variant="ghost" size="sm" onClick={resetAdjustments}>
+                              <Undo2 className="size-3.5" /> Reset
+                            </Button>
+                          }
+                        >
+                          <PhotoSliderControl
+                            label="Sharpness"
+                            icon={<Sparkles className="size-4" />}
+                            value={sharpness}
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            formatValue={(v) => `${Math.round(v * 100)}%`}
+                            onChange={setSharpness}
+                          />
+                          <PhotoSliderControl
+                            label="Brightness"
+                            icon={<SunMedium className="size-4" />}
+                            value={brightness}
+                            min={0.5}
+                            max={1.5}
+                            step={0.02}
+                            formatValue={(v) => formatPercentNeutral(v, 1)}
+                            onChange={setBrightness}
+                          />
+                          <PhotoSliderControl
+                            label="Contrast"
+                            value={contrast}
+                            min={0.5}
+                            max={1.5}
+                            step={0.02}
+                            formatValue={(v) => formatPercentNeutral(v, 1)}
+                            onChange={setContrast}
+                          />
+                        </PhotoEditorSection>
+                      ) : null}
+
+                      {activePanel === "color" ? (
+                        <PhotoEditorSection
+                          title="Color Balance"
+                          action={
+                            <Button type="button" variant="ghost" size="sm" onClick={resetColorBalance}>
+                              <Undo2 className="size-3.5" /> Reset
+                            </Button>
+                          }
+                        >
+                          <div className="flex gap-2" role="tablist" aria-label="Color balance mode">
+                            {(
+                              [
+                                { id: "cmyk" as const, label: "CMYK" },
+                                { id: "rgb" as const, label: "RGB" },
+                              ] as const
+                            ).map((mode) => (
+                              <button
+                                key={mode.id}
+                                type="button"
+                                role="tab"
+                                aria-selected={colorMode === mode.id}
+                                onClick={() => setColorMode(mode.id)}
+                                className={
+                                  colorMode === mode.id
+                                    ? "rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-white"
+                                    : "rounded-full bg-muted/40 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                                }
+                              >
+                                {mode.label}
+                              </button>
+                            ))}
+                          </div>
+                          {colorMode === "rgb" ? (
+                            <>
+                              <PhotoSliderControl
+                                label="Red"
+                                icon={<span className="size-2.5 rounded-full bg-red-500" />}
+                                value={colorBalanceR}
+                                min={-1}
+                                max={1}
+                                step={0.02}
+                                formatValue={(v) => formatPercentNeutral(v, 0)}
+                                onChange={setColorBalanceR}
+                              />
+                              <PhotoSliderControl
+                                label="Green"
+                                icon={<span className="size-2.5 rounded-full bg-green-500" />}
+                                value={colorBalanceG}
+                                min={-1}
+                                max={1}
+                                step={0.02}
+                                formatValue={(v) => formatPercentNeutral(v, 0)}
+                                onChange={setColorBalanceG}
+                              />
+                              <PhotoSliderControl
+                                label="Blue"
+                                icon={<span className="size-2.5 rounded-full bg-blue-500" />}
+                                value={colorBalanceB}
+                                min={-1}
+                                max={1}
+                                step={0.02}
+                                formatValue={(v) => formatPercentNeutral(v, 0)}
+                                onChange={setColorBalanceB}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              <PhotoSliderControl
+                                label="Cyan"
+                                icon={<span className="size-2.5 rounded-full bg-cyan-400" />}
+                                value={-colorBalanceR}
+                                min={-1}
+                                max={1}
+                                step={0.02}
+                                formatValue={(v) => formatPercentNeutral(v, 0)}
+                                onChange={(v) => setColorBalanceR(-v)}
+                              />
+                              <PhotoSliderControl
+                                label="Magenta"
+                                icon={<span className="size-2.5 rounded-full bg-fuchsia-500" />}
+                                value={-colorBalanceG}
+                                min={-1}
+                                max={1}
+                                step={0.02}
+                                formatValue={(v) => formatPercentNeutral(v, 0)}
+                                onChange={(v) => setColorBalanceG(-v)}
+                              />
+                              <PhotoSliderControl
+                                label="Yellow"
+                                icon={<span className="size-2.5 rounded-full bg-yellow-400" />}
+                                value={-colorBalanceB}
+                                min={-1}
+                                max={1}
+                                step={0.02}
+                                formatValue={(v) => formatPercentNeutral(v, 0)}
+                                onChange={(v) => setColorBalanceB(-v)}
+                              />
+                              <PhotoSliderControl
+                                label="Black"
+                                icon={
+                                  <span className="size-2.5 rounded-full bg-neutral-900 ring-1 ring-neutral-400" />
+                                }
+                                value={colorBalanceK}
+                                min={-1}
+                                max={1}
+                                step={0.02}
+                                formatValue={(v) => formatPercentNeutral(v, 0)}
+                                onChange={setColorBalanceK}
+                              />
+                            </>
+                          )}
+                          <p className="text-xs text-muted-foreground">
+                            C, M, and Y map inversely to R, G, and B. Black (K) adjusts overall darkness.
+                          </p>
+                        </PhotoEditorSection>
+                      ) : null}
+
+                      {activePanel === "advanced" ? (
+                        <PhotoEditorSection
+                          title="Advanced Adjustments"
+                          action={
+                            <Button type="button" variant="ghost" size="sm" onClick={resetCurve}>
+                              <Undo2 className="size-3.5" /> Reset
+                            </Button>
+                          }
+                        >
+                          <PhotoCurveEditor points={curve} onChange={setCurve} />
+                        </PhotoEditorSection>
+                      ) : null}
+                    </div>
                   )}
+
+                  {currentPhoto && onRemove && !source && !cameraActive ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="mt-4 w-full text-destructive"
+                      onClick={() => void onRemove()}
+                    >
+                      <Trash2 className="size-4" /> Remove photo
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 
               {source && !cameraActive ? (
-                <div className="shrink-0 border-b border-border/60 px-4 py-3">
-                  <PhotoEditorTabs value={activePanel} onChange={setActivePanel} />
-                </div>
-              ) : null}
-
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
-                {cameraActive ? (
-                  <div className="flex gap-2">
-                    <Button type="button" size="lg" className="flex-1" onClick={captureFrame}>
-                      <Camera className="size-4" /> Capture
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="lg"
-                      className="shrink-0 px-3"
-                      aria-label="Switch camera"
-                      title={cameraFacing === "environment" ? "Use front camera" : "Use back camera"}
-                      onClick={() =>
-                        setCameraFacing((value) => (value === "environment" ? "user" : "environment"))
-                      }
-                    >
-                      <SwitchCamera className="size-5" />
-                    </Button>
-                  </div>
-                ) : null}
-
-                {!cameraActive ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <Button type="button" variant="outline" onClick={openCamera}>
-                      <Camera className="size-4" /> Camera
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => galleryRef.current?.click()}>
-                      <ImageIcon className="size-4" /> Gallery
-                    </Button>
-                  </div>
-                ) : null}
-
-                <input
-                  ref={galleryRef}
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={(event) => void pick(event.target.files?.[0])}
-                />
-
-                {source ? (
-                  <div className="mt-4 space-y-4">
-                    {activePanel === "zoom" ? (
-                      <PhotoEditorSection
-                        title="Zoom"
-                        action={
-                          <Button type="button" variant="ghost" size="sm" onClick={() => setZoom(1)}>
-                            <Undo2 className="size-3.5" /> Reset
-                          </Button>
-                        }
-                      >
-                        <PhotoSliderControl
-                          label="Zoom"
-                          icon={<ZoomIn className="size-4" />}
-                          value={zoom}
-                          min={1}
-                          max={2.5}
-                          step={0.05}
-                          formatValue={(v) => `${Math.round((v - 1) * 100)}%`}
-                          onChange={setZoom}
-                        />
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setRotation((value) => (value + 90) % 360)}
-                          >
-                            <RotateCw className="size-4" /> Rotate
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={flipH ? "primary" : "outline"}
-                            onClick={() => setFlipH((value) => !value)}
-                          >
-                            <FlipHorizontal className="size-4" /> {flipH ? "Flipped" : "Flip"}
-                          </Button>
-                        </div>
-                      </PhotoEditorSection>
-                    ) : null}
-
-                    {activePanel === "crop" ? (
-                      <PhotoEditorSection
-                        title="Crop"
-                        action={
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setOffsetX(0);
-                              setOffsetY(0);
-                            }}
-                          >
-                            <Undo2 className="size-3.5" /> Reset
-                          </Button>
-                        }
-                      >
-                        <PhotoSliderControl
-                          label="Horizontal"
-                          value={offsetX}
-                          min={-1}
-                          max={1}
-                          step={0.02}
-                          formatValue={(v) => formatPercentNeutral(v, 0)}
-                          onChange={setOffsetX}
-                        />
-                        <PhotoSliderControl
-                          label="Vertical"
-                          value={offsetY}
-                          min={-1}
-                          max={1}
-                          step={0.02}
-                          formatValue={(v) => formatPercentNeutral(v, 0)}
-                          onChange={setOffsetY}
-                        />
-                      </PhotoEditorSection>
-                    ) : null}
-
-                    {activePanel === "basic" ? (
-                      <PhotoEditorSection
-                        title="Basic Adjustments"
-                        action={
-                          <Button type="button" variant="ghost" size="sm" onClick={resetAdjustments}>
-                            <Undo2 className="size-3.5" /> Reset
-                          </Button>
-                        }
-                      >
-                        <PhotoSliderControl
-                          label="Sharpness"
-                          icon={<Sparkles className="size-4" />}
-                          value={sharpness}
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          formatValue={(v) => `${Math.round(v * 100)}%`}
-                          onChange={setSharpness}
-                        />
-                        <PhotoSliderControl
-                          label="Brightness"
-                          icon={<SunMedium className="size-4" />}
-                          value={brightness}
-                          min={0.5}
-                          max={1.5}
-                          step={0.02}
-                          formatValue={(v) => formatPercentNeutral(v, 1)}
-                          onChange={setBrightness}
-                        />
-                        <PhotoSliderControl
-                          label="Contrast"
-                          value={contrast}
-                          min={0.5}
-                          max={1.5}
-                          step={0.02}
-                          formatValue={(v) => formatPercentNeutral(v, 1)}
-                          onChange={setContrast}
-                        />
-                      </PhotoEditorSection>
-                    ) : null}
-
-                    {activePanel === "color" ? (
-                      <PhotoEditorSection
-                        title="Color Balance"
-                        action={
-                          <Button type="button" variant="ghost" size="sm" onClick={resetColorBalance}>
-                            <Undo2 className="size-3.5" /> Reset
-                          </Button>
-                        }
-                      >
-                        <div className="flex gap-2" role="tablist" aria-label="Color balance mode">
-                          {(
-                            [
-                              { id: "rgb" as const, label: "RGB" },
-                              { id: "cmyk" as const, label: "CMYK" },
-                            ] as const
-                          ).map((mode) => (
-                            <button
-                              key={mode.id}
-                              type="button"
-                              role="tab"
-                              aria-selected={colorMode === mode.id}
-                              onClick={() => setColorMode(mode.id)}
-                              className={
-                                colorMode === mode.id
-                                  ? "rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-white"
-                                  : "rounded-full bg-muted/40 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                              }
-                            >
-                              {mode.label}
-                            </button>
-                          ))}
-                        </div>
-                        {colorMode === "rgb" ? (
-                          <>
-                            <PhotoSliderControl
-                              label="Red"
-                              icon={<span className="size-2.5 rounded-full bg-red-500" />}
-                              value={colorBalanceR}
-                              min={-1}
-                              max={1}
-                              step={0.02}
-                              formatValue={(v) => formatPercentNeutral(v, 0)}
-                              onChange={setColorBalanceR}
-                            />
-                            <PhotoSliderControl
-                              label="Green"
-                              icon={<span className="size-2.5 rounded-full bg-green-500" />}
-                              value={colorBalanceG}
-                              min={-1}
-                              max={1}
-                              step={0.02}
-                              formatValue={(v) => formatPercentNeutral(v, 0)}
-                              onChange={setColorBalanceG}
-                            />
-                            <PhotoSliderControl
-                              label="Blue"
-                              icon={<span className="size-2.5 rounded-full bg-blue-500" />}
-                              value={colorBalanceB}
-                              min={-1}
-                              max={1}
-                              step={0.02}
-                              formatValue={(v) => formatPercentNeutral(v, 0)}
-                              onChange={setColorBalanceB}
-                            />
-                          </>
-                        ) : (
-                          <>
-                            <PhotoSliderControl
-                              label="Cyan"
-                              icon={<span className="size-2.5 rounded-full bg-cyan-400" />}
-                              value={-colorBalanceR}
-                              min={-1}
-                              max={1}
-                              step={0.02}
-                              formatValue={(v) => formatPercentNeutral(v, 0)}
-                              onChange={(v) => setColorBalanceR(-v)}
-                            />
-                            <PhotoSliderControl
-                              label="Magenta"
-                              icon={<span className="size-2.5 rounded-full bg-fuchsia-500" />}
-                              value={-colorBalanceG}
-                              min={-1}
-                              max={1}
-                              step={0.02}
-                              formatValue={(v) => formatPercentNeutral(v, 0)}
-                              onChange={(v) => setColorBalanceG(-v)}
-                            />
-                            <PhotoSliderControl
-                              label="Yellow"
-                              icon={<span className="size-2.5 rounded-full bg-yellow-400" />}
-                              value={-colorBalanceB}
-                              min={-1}
-                              max={1}
-                              step={0.02}
-                              formatValue={(v) => formatPercentNeutral(v, 0)}
-                              onChange={(v) => setColorBalanceB(-v)}
-                            />
-                            <PhotoSliderControl
-                              label="Black"
-                              icon={
-                                <span className="size-2.5 rounded-full bg-neutral-900 ring-1 ring-neutral-400" />
-                              }
-                              value={colorBalanceK}
-                              min={-1}
-                              max={1}
-                              step={0.02}
-                              formatValue={(v) => formatPercentNeutral(v, 0)}
-                              onChange={setColorBalanceK}
-                            />
-                          </>
-                        )}
-                      </PhotoEditorSection>
-                    ) : null}
-
-                    {activePanel === "advanced" ? (
-                      <PhotoEditorSection
-                        title="Advanced Adjustments"
-                        action={
-                          <Button type="button" variant="ghost" size="sm" onClick={resetCurve}>
-                            <Undo2 className="size-3.5" /> Reset
-                          </Button>
-                        }
-                      >
-                        <PhotoCurveEditor points={curve} onChange={setCurve} />
-                      </PhotoEditorSection>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {currentPhoto && onRemove && !source ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="mt-4 w-full text-destructive"
-                    onClick={() => void onRemove()}
-                  >
-                    <Trash2 className="size-4" /> Remove photo
-                  </Button>
-                ) : null}
-              </div>
-
-              {source ? (
                 <div className="shrink-0 border-t border-border/60 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                   <Button
                     type="button"
