@@ -123,7 +123,7 @@ export function CollectDataForm() {
   const [schema, setSchema] = useState<SchemaField[]>([]);
   const [designDocument, setDesignDocument] = useState<Record<string, unknown> | null>(null);
   const [photoFrame, setPhotoFrame] = useState<PhotoFrame | null>(null);
-  const [uniqueKey, setUniqueKey] = useState("holder_code");
+  const [uniqueKey, setUniqueKey] = useState("");
   const [holderCode, setHolderCode] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [pendingImages, setPendingImages] = useState<Record<string, string>>({});
@@ -200,8 +200,10 @@ export function CollectDataForm() {
         setSchema(fields);
         setDesignDocument(data.document ?? null);
         setPhotoFrame(resolvePhotoFrame(data.photo_frame, data.document ?? null));
-        const unique = fields.find((f) => f.is_unique)?.key || "holder_code";
-        setUniqueKey(unique);
+        const unique =
+          fields.find((f) => f.is_unique && f.is_required) ||
+          fields.find((f) => f.is_unique);
+        setUniqueKey(unique?.key || "");
         setValues({});
         setPendingImages({});
         setPhotoEditorKey(null);
@@ -228,7 +230,9 @@ export function CollectDataForm() {
     () => schema.filter((f) => f.key !== uniqueKey && !isMediaField(f)),
     [schema, uniqueKey],
   );
-  const uniqueLabel = schema.find((f) => f.key === uniqueKey)?.label || "Unique ID";
+  const uniqueField = schema.find((f) => f.key === uniqueKey);
+  const uniqueLabel = uniqueField?.label || "Unique ID";
+  const uniqueRequired = Boolean(uniqueField?.is_required);
   const imageFramesByKey = useMemo(
     () => extractImageFramesByFieldKey(designDocument),
     [designDocument],
@@ -247,7 +251,7 @@ export function CollectDataForm() {
     const next: Record<string, string> = {};
     if (!level1Id) next.level1 = "Please select a level.";
     if (!level2Id) next.level2 = "Please select a sub-level.";
-    if (!holderCode.trim()) next[uniqueKey] = `${uniqueLabel} is required.`;
+    if (!holderCode.trim() && uniqueRequired) next[uniqueKey] = `${uniqueLabel} is required.`;
 
     for (const field of textFields) {
       if (field.is_required && !(values[field.key] || "").trim()) {
@@ -277,12 +281,12 @@ export function CollectDataForm() {
     setSubmitting(true);
     try {
       const dataPayload: Record<string, string> = { ...values };
-      if (uniqueKey !== "holder_code") {
+      if (uniqueKey && holderCode.trim()) {
         dataPayload[uniqueKey] = holderCode.trim();
       }
 
       const fd = new FormData();
-      fd.set("holder_code", holderCode.trim());
+      fd.set("holder_code", "");
       fd.set("level1", level1Id);
       fd.set("level2", level2Id);
       fd.set("data", JSON.stringify(dataPayload));
