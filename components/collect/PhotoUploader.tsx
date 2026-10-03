@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Camera,
@@ -36,7 +36,8 @@ import {
 import {
   approximateSize,
   captureVideoCoverFrame,
-  paintCropPreview,
+  loadImage,
+  paintLoadedCropPreview,
   readFileAsDataUrl,
   transformImage,
 } from "@/lib/image";
@@ -211,30 +212,40 @@ export function PhotoUploader({
     setSource((prev) => (prev?.startsWith("data:") ? prev : prev ?? currentPhoto));
   }, [open, currentPhoto, cameraActive]);
 
-  useEffect(() => {
+  const loadedPreviewRef = useRef<{ src: string; image: HTMLImageElement } | null>(null);
+
+  useLayoutEffect(() => {
     if (!open || !source || cameraActive) {
       setCanvasReady(false);
       return;
     }
     let cancelled = false;
     const gen = ++paintGenRef.current;
-    const paint = () => {
+    const draw = (image: HTMLImageElement) => {
+      if (cancelled || gen !== paintGenRef.current) return;
       const canvas = previewCanvasRef.current;
-      if (!canvas || cancelled) return false;
-      void paintCropPreview(canvas, source, cropOptions, previewWidth, previewHeight)
-        .then(() => {
-          if (!cancelled && gen === paintGenRef.current) setCanvasReady(true);
-        })
-        .catch(() => {
-          if (!cancelled && gen === paintGenRef.current) setCanvasReady(false);
-        });
-      return true;
+      if (!canvas) return;
+      paintLoadedCropPreview(canvas, image, cropOptions, previewWidth, previewHeight);
+      setCanvasReady(true);
     };
-    if (paint()) return () => { cancelled = true; };
-    const id = window.requestAnimationFrame(() => paint());
+    const cached = loadedPreviewRef.current;
+    if (cached?.src === source) {
+      draw(cached.image);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void loadImage(source)
+      .then((image) => {
+        if (cancelled || gen !== paintGenRef.current) return;
+        loadedPreviewRef.current = { src: source, image };
+        draw(image);
+      })
+      .catch(() => {
+        if (!cancelled && gen === paintGenRef.current) setCanvasReady(false);
+      });
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(id);
     };
   }, [open, source, cameraActive, cropOptions, previewWidth, previewHeight]);
 

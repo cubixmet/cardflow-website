@@ -226,14 +226,33 @@ export function PhotoPreviewFrame({
     dragRef.current = null;
   };
 
-  const onWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (!interactive) return;
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? -0.06 : 0.06;
-    const next = Math.max(1, Math.min(2.5, zoom + delta));
-    onZoomChange(next);
-    if (next <= 1.01) onOffsetChange(0, 0);
-  };
+  const frameRef = useRef<HTMLDivElement>(null);
+  const onZoomChangeRef = useRef(onZoomChange);
+  const onOffsetChangeRef = useRef(onOffsetChange);
+  onZoomChangeRef.current = onZoomChange;
+  onOffsetChangeRef.current = onOffsetChange;
+
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el || !interactive) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const delta = event.deltaY > 0 ? -0.06 : 0.06;
+      const next = Math.max(1, Math.min(2.5, zoomRef.current + delta));
+      onZoomChangeRef.current(next);
+      if (next <= 1.01) onOffsetChangeRef.current(0, 0);
+    };
+    const blockScroll = (event: TouchEvent) => {
+      if (event.cancelable) event.preventDefault();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("touchmove", blockScroll, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchmove", blockScroll);
+    };
+  }, [interactive]);
 
   const onTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
     if (event.touches.length === 2) {
@@ -259,8 +278,9 @@ export function PhotoPreviewFrame({
 
   return (
     <div
+      ref={frameRef}
       className={cn(
-        "relative touch-none",
+        "relative touch-none overscroll-none",
         interactive && (canPan ? "cursor-grab active:cursor-grabbing" : "cursor-default"),
       )}
       style={{ width: previewWidth, height: previewHeight }}
@@ -268,7 +288,6 @@ export function PhotoPreviewFrame({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      onWheel={onWheel}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}

@@ -236,14 +236,14 @@ export async function transformImage(src: string, options: TransformOptions): Pr
   return canvas.toDataURL("image/jpeg", quality);
 }
 
-export async function paintCropPreview(
+/** Draw an already-decoded image. Used so zoom and sliders update the preview immediately. */
+export function paintLoadedCropPreview(
   canvas: HTMLCanvasElement,
-  src: string,
+  image: CanvasImageSource,
   options: TransformOptions,
   displayW: number,
   displayH: number,
-): Promise<void> {
-  const image = await loadImage(src);
+): void {
   if (!canvas.isConnected) return;
   canvas.width = Math.max(1, Math.round(displayW * (window.devicePixelRatio || 1)));
   canvas.height = Math.max(1, Math.round(displayH * (window.devicePixelRatio || 1)));
@@ -254,6 +254,17 @@ export async function paintCropPreview(
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(canvas.width / displayW, canvas.height / displayH);
   drawCroppedPhoto(ctx, image, options, displayW, displayH);
+}
+
+export async function paintCropPreview(
+  canvas: HTMLCanvasElement,
+  src: string,
+  options: TransformOptions,
+  displayW: number,
+  displayH: number,
+): Promise<void> {
+  const image = await loadImage(src);
+  paintLoadedCropPreview(canvas, image, options, displayW, displayH);
 }
 
 /**
