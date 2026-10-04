@@ -60,7 +60,7 @@ export default function Features() {
     {
       icon: ShieldCheck,
       title: "Secure Barcode Formats",
-      desc: "Support Code 128, EAN-13, QR codes, and PDF417 format. Encode encryption hashes or custom ID links on generation.",
+      desc: "Code 128 barcodes and QR codes. Encode an ID or a custom link on each card.",
     },
     {
       icon: Printer,
