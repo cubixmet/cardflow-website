@@ -5,7 +5,7 @@ export const OPERATOR_NAME = "Cubixmet LLP";
 export const OPERATOR_URL = "https://www.cubixmet.com";
 export const PRIVACY_PATH = "/privacy";
 export const PRIVACY_EFFECTIVE_DATE = "13 August 2026";
-export const PRIVACY_LAST_UPDATED = "13 August 2026";
+export const PRIVACY_LAST_UPDATED = "17 October 2026";
 export const PRIVACY_CONTACT_EMAIL = "info@zamirzac.com";
 export const PRIVACY_CONTACT_PHONE = "+91 88916 33035";
 export const PRIVACY_CONTACT_ADDRESS = "Zamirzac Solutions, Calicut, Kerala, India";
@@ -60,8 +60,20 @@ export const PRIVACY_SECTIONS: PolicySection[] = [
     title: "Storage and retention",
     paragraphs: [
       "Application data is stored in our hosted databases and file storage used by the platform. Photos, signatures, designs, and documents are kept as files referenced by your workspace records.",
+      "A studio owner or admin can optionally connect a Google account so organisation card photos are stored in that account’s Google Drive instead of platform file storage. See “Google Drive” below. Designs, fonts, invoices, logos, and signatures stay on platform file storage.",
       "We retain active workspace data for as long as the studio or organisation account needs it to run ID card workflows. We do not use a hidden local database on your device as the source of truth for business records; apps may cache data temporarily for offline or performance use.",
       "When an account is deleted, we do not permanently erase historical workflow data. See “Account deletion” below.",
+    ],
+  },
+  {
+    id: "google-drive",
+    title: "Google Drive",
+    paragraphs: [
+      "Connecting Google Drive is optional. Only a studio owner or admin can connect or disconnect it. The connection is for the studio, and each organisation’s photos are placed in a separate folder.",
+      "We ask Google for permission to see the account email, create and manage files that this app creates, and read storage space on that Drive. We do not ask for access to the rest of the Google account’s files. The refresh token that lets the app open those files later is encrypted before it is stored on our servers. We do not store Google passwords.",
+      "When Drive is connected, new card photos and image fields for an organisation using Drive are saved under a folder named ZCards, then the studio, the organisation, the level, and the field. A studio can also move existing card photos into that structure. Moving a photo copies it, checks that the copy matches, and then removes the platform copy. Downloads, previews, and file names continue to use the card-holder details you already set in the product.",
+      "Disconnecting Drive stops new photos from being saved there. Later uploads use platform file storage again. Photos already in Google Drive stay in the studio’s Google account. We do not copy them back, and we do not delete them from Drive because the account was disconnected. Deleting a card holder or level in the product still removes that holder’s photos from whichever store currently has them, including Google Drive, when the connection can still open those files.",
+      "Google’s own terms and privacy policy apply to the Google account a studio connects. The studio is responsible for choosing an account that is allowed to store the photographs and for keeping that Google account in good standing.",
     ],
   },
   {
@@ -93,6 +105,7 @@ export const PRIVACY_SECTIONS: PolicySection[] = [
       "Email delivery for verification, magic links, password resets, and similar notices.",
       "Hosting, databases, and file storage that run the application.",
       "Payment or billing providers when credits or packages are purchased.",
+      "Google Drive, only when a studio owner or admin connects a Google account so card photos can be stored in that Drive. Google then processes those files under its own terms.",
       "Maps or contact links on the public website (for example opening an address in Google Maps) if you choose to follow them.",
     ],
   },

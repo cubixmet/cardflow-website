@@ -46,7 +46,21 @@ export default function Terms() {
           The designs, layout variable compilers, and all visual materials developed on this site belong to {brandSettings.company_name} and are protected under copyright laws.
         </p>
 
-        <h2 className="text-lg font-bold text-foreground mt-6">5. User-Uploaded Content and Licensing</h2>
+        <h2 className="text-lg font-bold text-foreground mt-6">5. Optional Google Drive storage</h2>
+        <p>
+          A studio owner or admin may connect a Google account so organisation card photos are stored in that account’s Google Drive. Connecting Drive is optional. If it is not connected, photos stay in platform file storage.
+        </p>
+        <p>
+          You are responsible for the Google account you connect, for having the right to store card-holder photographs there, and for complying with Google’s terms. {brandSettings.platform_name} uses that connection only to create, read, and manage the photo files the app places in Drive, and to check available storage space. We do not take ownership of your Google account.
+        </p>
+        <p>
+          Disconnecting Drive returns new photo uploads to platform file storage. Photos already saved in Google Drive remain in that Google account. We do not copy them back to platform storage and we do not delete them from Drive only because the connection was removed. If you delete a card holder or level in the product, the related photos are removed from the store that currently holds them.
+        </p>
+        <p>
+          Downloads and file names are produced from the card-holder and level details in {brandSettings.platform_name}. Storing a photo in Google Drive does not change those download features or naming rules.
+        </p>
+
+        <h2 className="text-lg font-bold text-foreground mt-6">6. User-Uploaded Content and Licensing</h2>
         <p>
           If you use {brandSettings.platform_name} Studio to upload fonts, designs, images, logos, or other creative assets, you are solely responsible for ensuring that you have the right to use and distribute that content—including any required licenses, permissions, or third-party approvals.
         </p>

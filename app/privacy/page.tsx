@@ -13,7 +13,7 @@ import {
 
 export const metadata: Metadata = {
   title: "Privacy & Policy",
-  description: `How ${PLATFORM_NAME} collects, stores, uses, and protects account and ID card data, including account deletion and security practices.`,
+  description: `How ${PLATFORM_NAME} collects, stores, uses, and protects account and ID card data, including optional Google Drive photo storage, account deletion, and security practices.`,
 };
 
 export default function PrivacyPage() {
